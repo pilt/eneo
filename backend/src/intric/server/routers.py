@@ -103,6 +103,7 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.api.audit.routes import router as audit_router
+from intric.ai_gateway.router import router as ai_gateway_router
 
 router = APIRouter()
 
@@ -213,6 +214,7 @@ router.include_router(
     federation_router, prefix="", tags=["authentication"]
 )  # Public auth endpoints (no prefix)
 router.include_router(documentation_router, prefix="")
+router.include_router(ai_gateway_router, prefix="/ai-gateway", tags=["ai-gateway"])
 
 if get_settings().using_access_management:
     from intric.roles.roles_router import router as roles_router

@@ -1,0 +1,18 @@
+{
+  "name": "ai-sdk-client",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "chat": "NO_PROXY=localhost,127.0.0.1 bun run index.ts"
+  },
+  "dependencies": {
+    "ai": "^6.0.138"
+  }
+}
