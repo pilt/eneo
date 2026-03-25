@@ -1,12 +1,14 @@
 # Eneo Development Setup Guide
 
-This guide covers setting up Eneo for development and testing using the DevContainer approach.
+This guide covers two approaches to setting up Eneo for development:
+- **[DevContainer Setup](#devcontainer-setup-5-steps)** — recommended for VS Code users, handles all dependencies automatically
+- **[Manual Setup](#manual-setup-without-devcontainer)** — for those not using VS Code or preferring direct control
 
 > **Production Deployment?** See the [DEPLOYMENT.md](./DEPLOYMENT.md) guide for production setup.
 
 ## Quick Overview
 
-- **Development Port**: `8123` (Backend API)
+- **Development Port**: `8123` (Backend API, DevContainer) / `8000` (manual setup)
 - **Frontend Port**: `3000`
 - **Recommended Setup**: VS Code DevContainer
 - **Time to Setup**: ~10 minutes
@@ -231,6 +233,140 @@ cd backend
 uv run alembic revision --autogenerate -m "describe your changes"
 uv run alembic upgrade head
 ```
+
+## Manual Setup (Without DevContainer)
+
+Use this approach if you're not using VS Code, or prefer to run services directly on your machine.
+
+### Prerequisites
+
+- **Docker** and **Docker Compose** (for PostgreSQL and Redis)
+- **Python 3.11+** and **uv** (`pip install uv`)
+- **Bun** - [Download here](https://bun.sh/)
+- **At least one AI provider API key**
+
+### Step 1: Start Database Services
+
+```bash
+cd backend
+docker compose up -d
+```
+
+This starts PostgreSQL (port `5432`) and Redis (port `6379`).
+
+### Step 2: Configure Environment
+
+Copy the example env file and edit it:
+
+```bash
+cd backend
+cp .env.example .env  # or create .env manually
+```
+
+Key settings to update in `backend/.env`:
+
+```bash
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=postgres
+
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+JWT_SECRET=your-secret-here
+URL_SIGNING_KEY=your-signing-key-here
+
+# Set to false for manual setup (important — see note below)
+TESTING=false
+```
+
+> **Important: The `TESTING` flag**
+> When `TESTING=true`, Alembic automatically redirects all migrations to a database named `<POSTGRES_DB>_test` (e.g. `postgres_test`). This keeps your test database separate from your development database. For running the app locally, ensure `TESTING=false`.
+
+### Step 3: Create Databases and Run Migrations
+
+```bash
+cd backend
+
+# Create the test database (required for running tests)
+docker exec <your-postgres-container> psql -U postgres -c "CREATE DATABASE postgres_test;"
+
+# Run migrations for the development database
+TESTING=false uv run alembic upgrade head
+```
+
+### Step 4: Initialize with a Default User
+
+The `init_db.py` script creates an initial tenant and admin user. Pass the details via environment variables:
+
+```bash
+cd backend
+TESTING=false \
+DEFAULT_TENANT_NAME=myorg \
+DEFAULT_TENANT_QUOTA_LIMIT=1000000 \
+DEFAULT_USER_NAME=Admin \
+DEFAULT_USER_EMAIL=admin@example.com \
+DEFAULT_USER_PASSWORD=yourpassword \
+uv run python init_db.py
+```
+
+> **Note:** `init_db.py` also runs migrations automatically. If `TESTING` is not explicitly overridden, it reads from `.env`.
+
+### Step 5: Configure the Frontend
+
+```bash
+cd frontend/apps/web
+```
+
+Create a `.env` file with the following content:
+
+```bash
+ENEO_BACKEND_URL="http://localhost:8000"
+PUBLIC_ENEO_BACKEND_URL="http://localhost:8000"
+JWT_SECRET="your-secret-here"   # Must match JWT_SECRET in backend/.env
+PUBLIC_ORIGIN=http://localhost:3000
+```
+
+Then install dependencies:
+
+```bash
+cd frontend
+bun install
+```
+
+> **Note on HTTP proxies:** If `HTTP_PROXY` or `HTTPS_PROXY` environment variables are set in your shell, they may cause the frontend's server-side fetch requests to be routed through the proxy, breaking requests to `localhost`. Unset them before starting the frontend dev server: `unset HTTP_PROXY HTTPS_PROXY`.
+
+### Step 6: Start Services
+
+Open separate terminals for each service:
+
+**Terminal 1 — Backend:**
+```bash
+cd backend
+uv run gunicorn src.intric.server.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd frontend/apps/web
+bunx vite dev --host --port 3000
+```
+
+**Terminal 3 — Worker (optional, required for document processing):**
+```bash
+cd backend
+uv run arq src.intric.worker.arq.WorkerSettings
+```
+
+### Verify Manual Setup
+
+- Frontend: http://localhost:3000
+- Backend API Docs: http://localhost:8000/docs
+- Login with the credentials you set in Step 4
+
+---
 
 ## Next Steps
 

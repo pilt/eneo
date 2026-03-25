@@ -14,26 +14,46 @@ Intric Backend server <---> Frontend server  <---> Browser / Client
 
 All deployment specific settings are configured via runtime environment variables. See the sections below (Development, Deployment) to get tips on how to set them for different use cases.
 
-| Variable              | Description                                                                                                           |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `JWT_SECRET`          | Secret to use when signing JWT tokens on the frontend, used for logging in users.                                     |
-| `ENEO_BACKEND_URL`  | The base url of your Intric backend instance.                                                                         |
-| `ENEO_BACKEND_SERVER_URL` | _Optional._ The url of the Intric backend server, for server-side rendering. Useful when running the backend with the frontend. Defaults to `ENEO_BACKEND_URL` |
-| `MOBILITY_GUARD_AUTH` | _Optional. Required for OIDC/MobilityGuard._ `Authorize` endpoint for the MobilityGuard flow, more info further down. |
+| Variable                        | Description                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `JWT_SECRET`                    | Secret for signing frontend JWT tokens. **Must match `JWT_SECRET` in the backend `.env`.**                            |
+| `ENEO_BACKEND_URL`              | Base URL of the backend (used for client-side requests from the browser).                                             |
+| `PUBLIC_ENEO_BACKEND_URL`       | Publicly accessible backend URL, exposed to the browser. Usually the same as `ENEO_BACKEND_URL`.                      |
+| `ENEO_BACKEND_SERVER_URL`       | _Optional._ Backend URL for server-side rendering only. Useful when frontend and backend share a private network. Defaults to `ENEO_BACKEND_URL`. |
+| `PUBLIC_ORIGIN`                 | The public-facing origin of the frontend (e.g. `http://localhost:3000`). Required in production for CSRF protection.  |
+| `MOBILITY_GUARD_AUTH`           | _Optional. Required for OIDC/MobilityGuard._ `Authorize` endpoint for the MobilityGuard flow, more info further down. |
+| `OIDC_DISCOVERY_ENDPOINT`       | _Optional._ OIDC discovery endpoint for multi-tenant federation login.                                                |
+| `OIDC_CLIENT_ID`                | _Optional._ OIDC client ID for federation.                                                                            |
+| `OIDC_CLIENT_SECRET`            | _Optional._ OIDC client secret for federation.                                                                        |
+| `FEDERATION_PER_TENANT_ENABLED` | _Optional._ Set to `true` to enable per-tenant OIDC federation. Default: `false`.                                     |
+
+> **Note on HTTP proxies (local development):** If `HTTP_PROXY` or `HTTPS_PROXY` are set in your shell, they may cause server-side fetch requests to route through the proxy, breaking requests to `localhost`. Unset them before starting the dev server: `unset HTTP_PROXY HTTPS_PROXY`.
 
 ### Example config
 
-Your environment could look something like this:
+For local development, create a `.env` file in this directory (`frontend/apps/web/.env`):
 
 ```
-JWT_SECRET="abc123"
-ENEO_BACKEND_URL="https://backend.intric.ai:1234"
+JWT_SECRET="your-secret"           # Must match backend JWT_SECRET
+ENEO_BACKEND_URL="http://localhost:8000"
+PUBLIC_ENEO_BACKEND_URL="http://localhost:8000"
+PUBLIC_ORIGIN=http://localhost:3000
+FEDERATION_PER_TENANT_ENABLED=false
+```
+
+For production:
+
+```
+JWT_SECRET="strong-random-secret"
+ENEO_BACKEND_URL="https://api.example.com"
+PUBLIC_ENEO_BACKEND_URL="https://api.example.com"
+PUBLIC_ORIGIN=https://app.example.com
 MOBILITY_GUARD_AUTH="https://example.com/mg-local/intric/oauth2/authorize"
 ```
 
 ## Local Development
 
-Use the vite dev server for local development; setup a `.env` file locally to configure the required environment variables (See the _Environment_ section). You don't need to set `ORIGIN` when working locally.
+Use the vite dev server for local development; set up a `.env` file in this directory to configure the required environment variables (see the _Environment_ section above).
 
 ```bash
 # Prepare everything, install and build dependencies
