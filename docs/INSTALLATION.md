@@ -256,11 +256,11 @@ This starts PostgreSQL (port `5432`) and Redis (port `6379`).
 
 ### Step 2: Configure Environment
 
-Copy the example env file and edit it:
+Copy the template env file and edit it:
 
 ```bash
 cd backend
-cp .env.example .env  # or create .env manually
+cp .env.template .env
 ```
 
 Key settings to update in `backend/.env`:
@@ -291,7 +291,8 @@ TESTING=false
 cd backend
 
 # Create the test database (required for running tests)
-docker exec <your-postgres-container> psql -U postgres -c "CREATE DATABASE postgres_test;"
+# Container name comes from docker-compose.yml — default is "backend-db-1"
+docker exec backend-db-1 psql -U postgres -c "CREATE DATABASE postgres_test;"
 
 # Run migrations for the development database
 TESTING=false uv run alembic upgrade head
@@ -299,7 +300,14 @@ TESTING=false uv run alembic upgrade head
 
 ### Step 4: Initialize with a Default User
 
-The `init_db.py` script creates an initial tenant and admin user. Pass the details via environment variables:
+The `init_db.py` script creates an initial tenant and admin user. It reads `DEFAULT_*` values from `.env` — the template already provides sensible defaults (`user@example.com` / `Password1!`), so you can run it as-is or customise the values first.
+
+```bash
+cd backend
+uv run python init_db.py
+```
+
+Or override credentials inline without editing `.env`:
 
 ```bash
 cd backend
@@ -312,7 +320,7 @@ DEFAULT_USER_PASSWORD=yourpassword \
 uv run python init_db.py
 ```
 
-> **Note:** `init_db.py` also runs migrations automatically. If `TESTING` is not explicitly overridden, it reads from `.env`.
+> **Note:** `init_db.py` also runs migrations automatically. Ensure `TESTING=false` in your `.env` so it targets the development database, not the test database.
 
 ### Step 5: Configure the Frontend
 
@@ -370,7 +378,7 @@ uv run arq src.intric.worker.arq.WorkerSettings
 
 ## Next Steps
 
-1. **Explore the API** - Visit http://localhost:8123/docs
+1. **Explore the API** - Visit the interactive docs at `/docs` on your backend port (`http://localhost:8123/docs` for DevContainer, `http://localhost:8000/docs` for manual setup)
 2. **Create Your First Assistant** - Use the web interface
 3. **Enable Document Processing** - Start the worker service
 4. **Configure Additional Models** - Through the admin panel
@@ -379,7 +387,7 @@ uv run arq src.intric.worker.arq.WorkerSettings
 ## Additional Resources
 
 - **[Deployment Guide](./DEPLOYMENT.md)** - Production setup
-- **[API Documentation](http://localhost:8123/docs)** - Interactive API explorer
+- **[API Documentation](http://localhost:8000/docs)** - Interactive API explorer (manual setup)
 - **[GitHub Issues](https://github.com/eneo-ai/eneo/issues)** - Report problems
 - **[Discussions](https://github.com/eneo-ai/eneo/discussions)** - Get help
 

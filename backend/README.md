@@ -29,7 +29,7 @@ Tests use a separate database named `<POSTGRES_DB>_test` (default: `postgres_tes
 Create the test database before running tests for the first time:
 
 ```bash
-docker exec <postgres-container-name> psql -U postgres -c "CREATE DATABASE postgres_test;"
+docker exec backend-db-1 psql -U postgres -c "CREATE DATABASE postgres_test;"
 ```
 
 Then run migrations for the test DB:
