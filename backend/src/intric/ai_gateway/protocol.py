@@ -145,6 +145,70 @@ def chunk_data(name: str, data: Any) -> str:
 #   e  — finish step
 #   d  — stream done (final)
 
+# ---------------------------------------------------------------------------
+# OpenAI Chat Completions compatible helpers
+# ---------------------------------------------------------------------------
+# Minimal subset of the OpenAI streaming format so that any OpenAI-compatible
+# client (pydantic-ai, openai-python, LangChain, etc.) can talk to the gateway.
+
+
+class OpenAIChatRequest(BaseModel):
+    """OpenAI-compatible /v1/chat/completions request body with eneo extensions."""
+
+    model: str = "default"
+    messages: list[dict[str, Any]]
+    stream: bool = True
+    # eneo extensions
+    assistant_id: Optional[str] = None
+    session_id: Optional[str] = None
+    model_config = {"extra": "allow"}
+
+    def last_user_content(self) -> str:
+        """Extract text from the last user message."""
+        for msg in reversed(self.messages):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                # handle list-of-parts format
+                if isinstance(content, list):
+                    return "".join(
+                        p.get("text", "") for p in content if p.get("type") == "text"
+                    )
+        return ""
+
+
+def openai_chat_chunk(
+    chunk_id: str,
+    delta_content: str | None = None,
+    finish_reason: str | None = None,
+    model: str = "eneo",
+) -> str:
+    """Format a single SSE chunk in OpenAI chat completions streaming format."""
+    delta: dict[str, Any] = {}
+    if delta_content is not None:
+        delta["content"] = delta_content
+    if finish_reason is not None:
+        delta = {}  # final chunk has empty delta
+
+    chunk = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {json.dumps(chunk)}\n\n"
+
+
+OPENAI_STREAM_DONE = "data: [DONE]\n\n"
+
+
 DS_DONE_HEADER = "x-vercel-ai-data-stream"
 DS_DONE_HEADER_VALUE = "v1"
 
