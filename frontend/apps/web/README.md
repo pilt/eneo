@@ -17,9 +17,9 @@ All deployment specific settings are configured via runtime environment variable
 | Variable                        | Description                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `JWT_SECRET`                    | Secret for signing frontend JWT tokens. **Must match `JWT_SECRET` in the backend `.env`.**                            |
-| `ENEO_BACKEND_URL`              | Base URL of the backend (used for client-side requests from the browser).                                             |
-| `PUBLIC_ENEO_BACKEND_URL`       | Publicly accessible backend URL, exposed to the browser. Usually the same as `ENEO_BACKEND_URL`.                      |
-| `ENEO_BACKEND_SERVER_URL`       | _Optional._ Backend URL for server-side rendering only. Useful when frontend and backend share a private network. Defaults to `ENEO_BACKEND_URL`. |
+| `ENEO_BACKEND_URL`              | Primary backend URL, exposed to the browser for API calls. Must be reachable from the user's browser.                 |
+| `PUBLIC_ENEO_BACKEND_URL`       | Backend URL for unauthenticated client flows (login page, federation discovery). Usually the same as `ENEO_BACKEND_URL`. |
+| `ENEO_BACKEND_SERVER_URL`       | _Optional._ Overrides `ENEO_BACKEND_URL` for server-side rendering requests. Useful when frontend and backend share a private network (e.g., `http://backend:8000` in Docker). Defaults to `ENEO_BACKEND_URL`. |
 | `PUBLIC_ORIGIN`                 | The public-facing origin of the frontend (e.g. `http://localhost:3000`). Required in production for CSRF protection.  |
 | `MOBILITY_GUARD_AUTH`           | _Optional. Required for OIDC/MobilityGuard._ `Authorize` endpoint for the MobilityGuard flow, more info further down. |
 | `OIDC_DISCOVERY_ENDPOINT`       | _Optional._ OIDC discovery endpoint for multi-tenant federation login.                                                |
