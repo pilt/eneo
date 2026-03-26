@@ -128,13 +128,13 @@ The frontend needs three URLs configured and must share the exact same `JWT_SECR
 
 ```bash
 # 1. Set the URLs (replace eneo.your-company.com with your actual domain)
-# Server-side URL - used by frontend SSR
+# Primary backend URL - exposed to the browser for API calls
 echo "ENEO_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
 
-# Internal URL - server-to-server within Docker (skips Traefik, faster)
+# Internal URL - server-to-server within Docker (overrides ENEO_BACKEND_URL for SSR, skips Traefik)
 echo "ENEO_BACKEND_SERVER_URL=http://backend:8000" >> env_frontend.env
 
-# Client-side URL - used by browser for API calls (PUBLIC_ exposes to browser)
+# Public backend URL - used by unauthenticated client (login/federation flows)
 echo "PUBLIC_ENEO_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
 
 # Origin - used for cookies and CORS
@@ -150,8 +150,9 @@ echo "JWT_SECRET=$JWT_SECRET_VALUE" >> env_frontend.env
 
 > **Important**:
 > - The `JWT_SECRET` must be identical in both `env_backend.env` and `env_frontend.env` for authentication to work correctly.
-> - `ENEO_BACKEND_SERVER_URL` must be `http://backend:8000` (using Docker service name, not `localhost`).
-> - `PUBLIC_ENEO_BACKEND_URL` is the URL the browser uses - must be your public domain.
+> - `ENEO_BACKEND_URL` is the primary URL the browser uses for API calls — must be your public domain.
+> - `ENEO_BACKEND_SERVER_URL` must be `http://backend:8000` (using Docker service name, not `localhost`). It overrides `ENEO_BACKEND_URL` for server-side rendering requests.
+> - `PUBLIC_ENEO_BACKEND_URL` is used for unauthenticated flows (login page, federation discovery).
 > - `PUBLIC_ORIGIN` is required for OIDC authentication.
 
 ### Step 3: Launch the Application
