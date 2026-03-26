@@ -8,8 +8,8 @@ See: https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, Union
-from uuid import uuid4
+from typing import Any, Literal, Optional, Union
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
@@ -60,6 +60,16 @@ class SubmitMessageRequest(BaseModel):
     trigger: Literal["submit-message"]
     id: str = Field(default_factory=lambda: str(uuid4()))
     messages: list[UIMessage]
+    # eneo-specific fields — pass via useChat's `body` option
+    assistant_id: Optional[UUID] = Field(
+        default=None,
+        description="UUID of the eneo assistant to chat with. "
+        "Required when starting a new conversation (no session_id).",
+    )
+    session_id: Optional[UUID] = Field(
+        default=None,
+        description="UUID of an existing eneo session to continue.",
+    )
 
 
 class RegenerateMessageRequest(BaseModel):
@@ -67,6 +77,8 @@ class RegenerateMessageRequest(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     messageId: str
     messages: list[UIMessage]
+    assistant_id: Optional[UUID] = None
+    session_id: Optional[UUID] = None
 
 
 ChatRequest = Union[SubmitMessageRequest, RegenerateMessageRequest]
@@ -113,3 +125,8 @@ def chunk_finish(finish_reason: str = "stop") -> str:
 
 def chunk_error(error_text: str) -> str:
     return _chunk({"type": "error", "errorText": error_text})
+
+
+def chunk_data(name: str, data: Any) -> str:
+    """Custom typed data chunk (type must match `data-*` pattern)."""
+    return _chunk({"type": f"data-{name}", "data": data})

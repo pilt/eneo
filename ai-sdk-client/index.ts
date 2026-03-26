@@ -2,11 +2,15 @@
  * Minimal Vercel AI SDK client for the eneo AI gateway.
  *
  * Usage:
- *   bun run index.ts "Hello, world!"
- *   bun run index.ts --url http://localhost:8000 "Tell me a joke"
+ *   bun run chat --assistant <uuid> "Hello, eneo!"
+ *   bun run chat --assistant <uuid> --session <uuid> "Continue..."
+ *   bun run chat --url http://localhost:8000 --assistant <uuid> "Hi"
  *
- * The eneo backend must be running and the AI gateway endpoint must be
- * mounted at /api/ai-gateway/chat (default when using the echo adapter).
+ * Authentication:
+ *   Set ENEO_API_KEY env var or pass --api-key <key>
+ *
+ * The eneo backend must be running with the AI gateway endpoint mounted at
+ * /api/ai-gateway/chat.
  */
 
 import { parseJsonEventStream, uiMessageChunkSchema } from "ai";
@@ -16,15 +20,32 @@ import { randomUUID } from "node:crypto";
 // Config
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv: string[]): { url: string; message: string } {
-  const args = argv.slice(2); // drop "bun" and script path
+interface Config {
+  url: string;
+  assistantId: string | null;
+  sessionId: string | null;
+  apiKey: string | null;
+  message: string;
+}
+
+function parseArgs(argv: string[]): Config {
+  const args = argv.slice(2);
 
   let url = "http://localhost:8000";
+  let assistantId: string | null = null;
+  let sessionId: string | null = null;
+  let apiKey: string | null = process.env.ENEO_API_KEY ?? null;
   let message = "";
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--url" && args[i + 1]) {
+    if ((args[i] === "--url" || args[i] === "-u") && args[i + 1]) {
       url = args[++i] as string;
+    } else if ((args[i] === "--assistant" || args[i] === "-a") && args[i + 1]) {
+      assistantId = args[++i] as string;
+    } else if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
+      sessionId = args[++i] as string;
+    } else if ((args[i] === "--api-key" || args[i] === "-k") && args[i + 1]) {
+      apiKey = args[++i] as string;
     } else {
       message = args.slice(i).join(" ");
       break;
@@ -32,11 +53,20 @@ function parseArgs(argv: string[]): { url: string; message: string } {
   }
 
   if (!message) {
-    console.error("Usage: bun run index.ts [--url <base-url>] <message>");
+    console.error(
+      "Usage: bun run chat [--url <base-url>] [--assistant <uuid>] " +
+        "[--session <uuid>] [--api-key <key>] <message>"
+    );
+    console.error("  ENEO_API_KEY env var can be used instead of --api-key");
     process.exit(1);
   }
 
-  return { url, message };
+  if (!assistantId && !sessionId) {
+    console.error("Error: --assistant <uuid> or --session <uuid> is required.");
+    process.exit(1);
+  }
+
+  return { url, assistantId, sessionId, apiKey, message };
 }
 
 // ---------------------------------------------------------------------------
@@ -58,14 +88,17 @@ interface SubmitMessageRequest {
   trigger: "submit-message";
   id: string;
   messages: UIMessage[];
+  assistant_id?: string;
+  session_id?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 
-async function chat(baseUrl: string, userMessage: string): Promise<void> {
-  const endpoint = `${baseUrl}/api/ai-gateway/chat`;
+async function chat(config: Config): Promise<void> {
+  const { url, assistantId, sessionId, apiKey, message } = config;
+  const endpoint = `${url}/api/ai-gateway/chat`;
 
   const body: SubmitMessageRequest = {
     trigger: "submit-message",
@@ -74,17 +107,25 @@ async function chat(baseUrl: string, userMessage: string): Promise<void> {
       {
         id: randomUUID(),
         role: "user",
-        parts: [{ type: "text", text: userMessage }],
+        parts: [{ type: "text", text: message }],
       },
     ],
   };
 
+  if (assistantId) body.assistant_id = assistantId;
+  if (sessionId) body.session_id = sessionId;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) headers["X-API-KEY"] = apiKey;
+
   console.log(`Sending to ${endpoint}:`);
-  console.log(`  > ${userMessage}\n`);
+  console.log(`  > ${message}\n`);
 
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -93,7 +134,6 @@ async function chat(baseUrl: string, userMessage: string): Promise<void> {
     throw new Error(`HTTP ${response.status}: ${text}`);
   }
 
-  // Verify the response speaks the UI message stream protocol
   const streamHeader = response.headers.get("x-vercel-ai-ui-message-stream");
   if (streamHeader !== "v1") {
     console.warn(
@@ -105,7 +145,6 @@ async function chat(baseUrl: string, userMessage: string): Promise<void> {
     throw new Error("Response has no body");
   }
 
-  // Parse the UI message stream using the AI SDK
   const chunkStream = parseJsonEventStream({
     stream: response.body,
     schema: uiMessageChunkSchema,
@@ -133,8 +172,17 @@ async function chat(baseUrl: string, userMessage: string): Promise<void> {
         );
         break;
 
-      // Ignore control chunks (start, start-step, finish-step, text-start, text-end)
       default:
+        // Print session_id from data-session chunk for conversation continuity
+        if (chunk.type === "data-session") {
+          const data = (chunk as any).data as { session_id: string };
+          if (data?.session_id) {
+            process.stdout.write(
+              `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`
+            );
+            process.stdout.write("< ");
+          }
+        }
         break;
     }
   }
@@ -144,9 +192,9 @@ async function chat(baseUrl: string, userMessage: string): Promise<void> {
 // Main
 // ---------------------------------------------------------------------------
 
-const { url, message } = parseArgs(process.argv);
+const config = parseArgs(process.argv);
 
-chat(url, message).catch((err) => {
+chat(config).catch((err) => {
   console.error("Error:", err.message);
   process.exit(1);
 });
