@@ -36,7 +36,13 @@ export default defineConfig({
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
     port: 3000,
     strictPort: true,
-    allowedHosts: [process.env.TS_FQDN].filter(Boolean)
+    allowedHosts: (() => {
+      try {
+        const origin = process.env.PUBLIC_ORIGIN;
+        if (origin) return [new URL(origin).hostname];
+      } catch {}
+      return [];
+    })()
   },
   define: {
     __FRONTEND_VERSION__: JSON.stringify(pkg.version),
