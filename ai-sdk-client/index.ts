@@ -14,11 +14,6 @@
  */
 
 import { parseJsonEventStream, uiMessageChunkSchema } from "ai";
-import type { z } from "zod";
-
-// Custom chunk type for eneo-specific data annotations not in the standard schema
-type DataSessionChunk = { type: "data-session"; data: { session_id: string } };
-type EneoChunk = z.infer<typeof uiMessageChunkSchema> | DataSessionChunk;
 import { randomUUID } from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -158,37 +153,38 @@ async function chat(config: Config): Promise<void> {
   process.stdout.write("< ");
 
   for await (const result of chunkStream) {
-    if (!result.success) continue;
+    if (result.success) {
+      const chunk = result.value;
 
-    const chunk = result.value as EneoChunk;
+      switch (chunk.type) {
+        case "text-delta":
+          process.stdout.write(chunk.delta);
+          break;
 
-    switch (chunk.type) {
-      case "text-delta":
-        process.stdout.write(chunk.delta);
-        break;
+        case "error":
+          process.stderr.write(`\nError from server: ${chunk.errorText}\n`);
+          break;
 
-      case "error":
-        process.stderr.write(`\nError from server: ${chunk.errorText}\n`);
-        break;
-
-      case "finish":
-        process.stdout.write(
-          `\n\n[done — finish reason: ${chunk.finishReason ?? "stop"}]\n`
-        );
-        break;
-
-      default:
-        // Print session_id from data-session chunk for conversation continuity
-        if (chunk.type === "data-session") {
-          const data = (chunk as DataSessionChunk).data;
-          if (data?.session_id) {
-            process.stdout.write(
-              `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`
-            );
-            process.stdout.write("< ");
-          }
+        case "finish":
+          process.stdout.write(
+            `\n\n[done — finish reason: ${chunk.finishReason ?? "stop"}]\n`
+          );
+          break;
+      }
+    } else {
+      // Custom eneo chunks (e.g. data-session) fail schema validation
+      // but are still valid JSON in the SSE stream — extract them from
+      // the raw value attached to the parse error.
+      const raw = (result as { rawValue?: Record<string, unknown> }).rawValue;
+      if (raw?.type === "data-session") {
+        const data = raw.data as { session_id?: string } | undefined;
+        if (data?.session_id) {
+          process.stdout.write(
+            `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`
+          );
+          process.stdout.write("< ");
         }
-        break;
+      }
     }
   }
 }

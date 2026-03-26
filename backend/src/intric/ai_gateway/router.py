@@ -149,6 +149,8 @@ async def _data_stream(
 
             elif completion.response_type == ResponseType.ERROR:
                 yield ds_error(completion.error or "Unknown error")
+                yield ds_finish_step("error", prompt_tokens, completion_tokens)
+                yield ds_finish("error", prompt_tokens, completion_tokens)
                 return
 
         yield ds_finish_step("stop", prompt_tokens, completion_tokens)
@@ -187,7 +189,12 @@ async def _ui_stream(
                     yield chunk_text_delta(text_id, completion.text)
 
             elif completion.response_type == ResponseType.ERROR:
+                if text_started:
+                    yield chunk_text_end(text_id)
                 yield chunk_error(completion.error or "Unknown error")
+                yield chunk_finish_step()
+                yield chunk_finish("error")
+                yield STREAM_DONE
                 return
 
         if text_started:

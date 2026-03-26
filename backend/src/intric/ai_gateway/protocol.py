@@ -1,14 +1,17 @@
 """
-Vercel AI SDK UI Message Stream Protocol types.
+Vercel AI SDK streaming protocol types.
 
-Request/response models for the AI SDK v5 chat protocol.
+Request models and SSE chunk helpers for both:
+- **UI Message Stream Protocol** (named SSE events, ``x-vercel-ai-ui-message-stream: v1``)
+- **Data Stream Protocol** (line-coded format, ``x-vercel-ai-data-stream: v1``)
+
 See: https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -34,9 +37,6 @@ class FilePart(BaseModel):
 class UnknownPart(BaseModel):
     type: str
     model_config = {"extra": "allow"}
-
-
-UIMessagePart = Union[TextPart, FilePart, UnknownPart]
 
 
 class UIMessage(BaseModel):
@@ -82,11 +82,6 @@ class RegenerateMessageRequest(BaseModel):
     messages: list[UIMessage]
     assistant_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
-
-
-# The discriminated union is used when `trigger` is present.
-# When absent, FastAPI falls back to SubmitMessageRequest (the first type).
-ChatRequest = Union[RegenerateMessageRequest, SubmitMessageRequest]
 
 
 # ---------------------------------------------------------------------------

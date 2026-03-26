@@ -49,12 +49,13 @@ export default function App() {
       },
     });
 
-  // Scroll to bottom whenever messages change
+  // Scroll to bottom when a new message is added (not on every token delta)
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages.length]);
 
   const isLoading = status === "streaming" || status === "submitted";
+  const isWaiting = status === "submitted"; // before first token arrives
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -89,7 +90,7 @@ export default function App() {
           </div>
         ))}
 
-        {isLoading && (
+        {isWaiting && (
           <div className="message assistant">
             <span className="role">assistant</span>
             <div className="content thinking">…</div>

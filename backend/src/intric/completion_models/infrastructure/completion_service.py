@@ -125,7 +125,10 @@ class CompletionService:
         if provider_db.provider_type == "simulator":
             config = provider_db.config or {}
             strategy = SimulationStrategy.from_config(config)
-            token_delay = float(config.get("token_delay", 0.04))
+            try:
+                token_delay = max(0.0, min(float(config.get("token_delay", 0.04)), 5.0))
+            except (ValueError, TypeError):
+                token_delay = 0.04
             logger.info(
                 f"Using SimulatorAdapter for model '{model.name}' (strategy={strategy.value})",
                 extra={

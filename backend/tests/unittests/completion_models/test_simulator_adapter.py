@@ -93,8 +93,9 @@ async def test_get_response_includes_token_usage(adapter: SimulatorAdapter):
     result = await adapter.get_response(ctx)
 
     assert result.usage is not None
-    assert result.usage.prompt_tokens > 0
-    assert result.usage.completion_tokens > 0
+    # "one two three" → 3 prompt tokens; "Echo: one two three" → 4 completion tokens
+    assert result.usage.prompt_tokens == 3
+    assert result.usage.completion_tokens == 4
 
 
 async def test_get_response_empty_input(adapter: SimulatorAdapter):
@@ -144,11 +145,22 @@ async def test_iterate_stream_stop_chunk_has_usage(adapter: SimulatorAdapter):
     chunks = [c async for c in adapter.iterate_stream(stream="usage test")]
     stop_chunk = next(c for c in chunks if c.stop)
     assert stop_chunk.usage is not None
-    assert stop_chunk.usage.completion_tokens > 0
+    # "usage test" → 2 prompt tokens; "Echo: usage test" → 3 completion tokens
+    assert stop_chunk.usage.prompt_tokens == 2
+    assert stop_chunk.usage.completion_tokens == 3
+
+
+async def test_iterate_stream_empty_input(adapter: SimulatorAdapter):
+    """Streaming with empty input yields 'Echo:' as a single word chunk plus stop."""
+    chunks = [c async for c in adapter.iterate_stream(stream="")]
+    non_stop = [c for c in chunks if not c.stop]
+    assert len(non_stop) == 1
+    assert non_stop[0].text == "Echo:"
+    assert chunks[-1].stop is True
 
 
 async def test_iterate_stream_word_count_matches(adapter: SimulatorAdapter):
-    """Each word produces exactly one chunk (plus a stop chunk)."""
+    """Each word in the reply produces exactly one chunk (plus a stop chunk)."""
     input_text = "one two three"
     chunks = [c async for c in adapter.iterate_stream(stream=input_text)]
 

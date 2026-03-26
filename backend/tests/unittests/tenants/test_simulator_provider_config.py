@@ -33,6 +33,25 @@ def test_simulator_strategy_field_is_in_config():
     assert strategy_field["in_"] == "config"
 
 
+def test_simulator_field_definitions_expose_token_delay():
+    fields = get_field_definitions("simulator")
+    names = [f["name"] for f in fields]
+    assert "token_delay" in names
+
+
+def test_simulator_token_delay_field_properties():
+    fields = get_field_definitions("simulator")
+    td_field = next(f for f in fields if f["name"] == "token_delay")
+    assert td_field["required"] is False
+    assert td_field["secret"] is False
+    assert td_field["in_"] == "config"
+
+
+def test_simulator_field_count():
+    fields = get_field_definitions("simulator")
+    assert len(fields) == 2
+
+
 def test_simulator_validates_with_empty_credentials():
     req = SimpleNamespace(api_key=None)
     errors = validate_provider_credentials("simulator", req, strict_mode=False)
