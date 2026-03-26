@@ -13,6 +13,8 @@ export default defineConfig({
       "/api": {
         target: ENEO_URL,
         changeOrigin: true,
+        // eneo mounts its API at /api/v1 — rewrite /api/* → /api/v1/*
+        rewrite: (path) => path.replace(/^\/api/, "/api/v1"),
       },
     },
   },

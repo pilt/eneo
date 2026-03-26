@@ -1,31 +1,39 @@
 """
 Vercel AI SDK gateway router.
 
-Exposes POST /api/ai-gateway/chat — a streaming endpoint that implements the
-Vercel AI SDK v5 UI Message Stream Protocol.  This allows any frontend using
-the Vercel AI SDK `useChat` hook (or a compatible client) to connect to eneo
-assistants directly.
+Two endpoints:
 
-The endpoint:
-- Authenticates via the same mechanisms as the rest of the API (Bearer token
-  or X-API-KEY header)
-- Extracts the user's question from the last user message in `messages`
-- Delegates to eneo's ConversationService (the same service used by the
-  regular /conversations/ endpoint)
-- Translates eneo's Completion stream into the Vercel AI SDK chunk format
+POST /api/ai-gateway/chat
+    **Data Stream Protocol** — the format used by the Vercel AI SDK
+    ``useChat`` React hook (``streamProtocol: "data"``, the default).
+    Response: ``text/plain`` with header ``x-vercel-ai-data-stream: v1``.
+
+POST /api/ai-gateway/chat-ui
+    **UI Message Stream Protocol** — named SSE events.
+    Response: ``text/event-stream`` with header
+    ``x-vercel-ai-ui-message-stream: v1``.
+    Used by the CLI client and other tooling that consumes the newer format.
+
+Both endpoints:
+- Authenticate via the same mechanisms as the rest of the API (Bearer /
+  X-API-KEY header)
+- Extract the user question from the last ``role: "user"`` message
+- Delegate to eneo's ConversationService
+- Accept ``assistant_id`` or ``session_id`` via the request body
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, AsyncIterable, Union
+from typing import TYPE_CHECKING, AsyncIterable, Union
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import Field
 
 from intric.ai_gateway.protocol import (
     STREAM_DONE,
+    DS_DONE_HEADER,
+    DS_DONE_HEADER_VALUE,
     RegenerateMessageRequest,
     SubmitMessageRequest,
     chunk_data,
@@ -37,6 +45,11 @@ from intric.ai_gateway.protocol import (
     chunk_text_delta,
     chunk_text_end,
     chunk_text_start,
+    ds_data,
+    ds_error,
+    ds_finish,
+    ds_finish_step,
+    ds_text,
 )
 from intric.ai_models.completion_models.completion_model import ResponseType
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -49,12 +62,11 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 
-_ANNOTATED_CHAT_REQUEST = Annotated[
-    Union[SubmitMessageRequest, RegenerateMessageRequest],
-    Field(discriminator="trigger"),
-]
+# SubmitMessageRequest first — it's the common case and has trigger optional,
+# so it will match any request that doesn't explicitly set trigger=regenerate-message.
+ChatRequestBody = Union[SubmitMessageRequest, RegenerateMessageRequest]
 
-_STREAM_HEADERS = {
+_UI_STREAM_HEADERS = {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
@@ -62,19 +74,99 @@ _STREAM_HEADERS = {
     "x-accel-buffering": "no",
 }
 
+_DATA_STREAM_HEADERS = {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    DS_DONE_HEADER: DS_DONE_HEADER_VALUE,
+    "x-accel-buffering": "no",
+}
 
-async def _translate_stream(
-    response: AssistantResponse,
+
+# ---------------------------------------------------------------------------
+# Shared: extract question & call ConversationService
+# ---------------------------------------------------------------------------
+
+
+async def _call_conversation_service(
+    request: ChatRequestBody,
+    container: "Container",
+    version: int,
+) -> "AssistantResponse":
+    if request.assistant_id is None and request.session_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Either assistant_id or session_id must be provided.",
+        )
+
+    last_user = next(
+        (m for m in reversed(request.messages) if m.role == "user"),
+        None,
+    )
+    if last_user is None:
+        raise HTTPException(status_code=422, detail="No user message found in messages.")
+
+    question = last_user.text_content()
+    if not question:
+        raise HTTPException(status_code=422, detail="User message has no text content.")
+
+    return await container.conversation_service().ask_conversation(
+        question=question,
+        session_id=request.session_id,
+        assistant_id=request.assistant_id,
+        stream=True,
+        version=version,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Data Stream translator  (useChat default)
+# ---------------------------------------------------------------------------
+
+
+async def _data_stream(
+    response: "AssistantResponse",
     db_session: AsyncSession,
 ) -> AsyncIterable[str]:
-    """
-    Wrap eneo's Completion async-generator in a Vercel AI SDK stream.
+    prompt_tokens = 0
+    completion_tokens = 0
 
-    The DB session must stay alive for the duration of the stream because
-    the underlying LiteLLM adapter may do final DB writes (token usage etc.)
-    after the last chunk.  gen_transaction keeps the SQLAlchemy transaction
-    open across the full yield sequence.
-    """
+    @gen_transaction(db_session)
+    async def _stream():
+        nonlocal prompt_tokens, completion_tokens
+
+        # Surface the eneo session_id as a typed data annotation so the
+        # frontend can store it for conversation continuity.
+        yield ds_data([{"session_id": str(response.session.id)}])
+
+        async for completion in response.answer:
+            if completion.response_type == ResponseType.TEXT:
+                if completion.text:
+                    yield ds_text(completion.text)
+                if completion.usage:
+                    prompt_tokens = completion.usage.prompt_tokens or 0
+                    completion_tokens = completion.usage.completion_tokens or 0
+
+            elif completion.response_type == ResponseType.ERROR:
+                yield ds_error(completion.error or "Unknown error")
+                return
+
+        yield ds_finish_step("stop", prompt_tokens, completion_tokens)
+        yield ds_finish("stop", prompt_tokens, completion_tokens)
+
+    async for chunk in _stream():
+        yield chunk
+
+
+# ---------------------------------------------------------------------------
+# UI Message Stream translator  (CLI client / newer tooling)
+# ---------------------------------------------------------------------------
+
+
+async def _ui_stream(
+    response: "AssistantResponse",
+    db_session: AsyncSession,
+) -> AsyncIterable[str]:
     message_id = str(uuid4())
     text_id = str(uuid4())
 
@@ -82,9 +174,6 @@ async def _translate_stream(
     async def _stream():
         yield chunk_start(message_id)
         yield chunk_start_step()
-
-        # Emit the session_id as a typed data chunk so the client can persist
-        # it and pass it back as session_id in the next request.
         yield chunk_data("session", {"session_id": str(response.session.id)})
 
         text_started = False
@@ -101,9 +190,6 @@ async def _translate_stream(
                 yield chunk_error(completion.error or "Unknown error")
                 return
 
-            # TOOL_CALL, FILES, INTRIC_EVENT — ignored for now; the Vercel AI
-            # SDK tool protocol can be added here incrementally.
-
         if text_started:
             yield chunk_text_end(text_id)
 
@@ -115,71 +201,55 @@ async def _translate_stream(
         yield chunk
 
 
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
 @router.post("/chat")
 async def ai_gateway_chat(
-    request: _ANNOTATED_CHAT_REQUEST,
+    request: ChatRequestBody = Body(...),
     version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(get_container(with_user=True)),
+    container: "Container" = Depends(get_container(with_user=True)),
     db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """
-    Vercel AI SDK UI Message Stream endpoint.
+    Vercel AI SDK **Data Stream** endpoint — compatible with ``useChat``.
 
-    Accepts the AI SDK v5 chat request body and streams back SSE events
-    following the UI Message Stream Protocol.
+    The response uses the data stream protocol (``x-vercel-ai-data-stream: v1``)
+    which is the default format consumed by the ``useChat`` React hook.
 
-    **Authentication**: same as the rest of the API — pass a Bearer token or
-    `X-API-KEY` header.
+    **eneo-specific fields** (pass via ``useChat``'s ``body`` option):
+    - ``assistant_id`` — UUID of the assistant to start a new conversation
+    - ``session_id`` — UUID of an existing session to continue
 
-    **Request body** (discriminated by `trigger`):
-    - `submit-message` — send a new user message
-    - `regenerate-message` — regenerate the last assistant turn
-
-    **eneo-specific fields** (set via `useChat`'s `body` option):
-    - `assistant_id` — UUID of the assistant to talk to (new conversations)
-    - `session_id` — UUID of an existing session to continue
-
-    One of `assistant_id` or `session_id` is required.
-
-    **Response** — `text/event-stream` with header
-    `x-vercel-ai-ui-message-stream: v1`.
-
-    A `data-session` chunk is emitted early in the stream containing the
-    eneo session UUID so clients can store it for conversation continuity:
-    ```json
-    {"type":"data-session","data":{"session_id":"<uuid>"}}
-    ```
+    A ``[{"session_id": "<uuid>"}]`` data annotation is emitted so the
+    frontend can persist the session for follow-up messages.
     """
-    if request.assistant_id is None and request.session_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Either assistant_id or session_id must be provided.",
-        )
-
-    # Extract the question from the last user message in the messages list
-    last_user = next(
-        (m for m in reversed(request.messages) if m.role == "user"),
-        None,
-    )
-    if last_user is None:
-        raise HTTPException(status_code=422, detail="No user message found in messages.")
-
-    question = last_user.text_content()
-    if not question:
-        raise HTTPException(status_code=422, detail="User message has no text content.")
-
-    conversation_service = container.conversation_service()
-
-    response = await conversation_service.ask_conversation(
-        question=question,
-        session_id=request.session_id,
-        assistant_id=request.assistant_id,
-        stream=True,
-        version=version,
-    )
-
+    response = await _call_conversation_service(request, container, version)
     return StreamingResponse(
-        _translate_stream(response, db_session),
+        _data_stream(response, db_session),
+        media_type="text/plain",
+        headers=_DATA_STREAM_HEADERS,
+    )
+
+
+@router.post("/chat-ui")
+async def ai_gateway_chat_ui(
+    request: ChatRequestBody = Body(...),
+    version: int = Query(default=1, ge=1, le=2),
+    container: "Container" = Depends(get_container(with_user=True)),
+    db_session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """
+    Vercel AI SDK **UI Message Stream** endpoint.
+
+    Uses the named-event SSE protocol (``x-vercel-ai-ui-message-stream: v1``).
+    Consumed by the CLI client and tooling that uses ``parseJsonEventStream``.
+    """
+    response = await _call_conversation_service(request, container, version)
+    return StreamingResponse(
+        _ui_stream(response, db_session),
         media_type="text/event-stream",
-        headers=_STREAM_HEADERS,
+        headers=_UI_STREAM_HEADERS,
     )

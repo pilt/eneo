@@ -40,7 +40,7 @@ UIMessagePart = Union[TextPart, FilePart, UnknownPart]
 
 
 class UIMessage(BaseModel):
-    id: str
+    id: Optional[str] = None
     role: Literal["user", "assistant", "system", "tool"]
     parts: list[Any] = Field(default_factory=list)
     model_config = {"extra": "allow"}
@@ -57,7 +57,9 @@ class UIMessage(BaseModel):
 
 
 class SubmitMessageRequest(BaseModel):
-    trigger: Literal["submit-message"]
+    # `trigger` is optional for compatibility with AI SDK v6's useChat hook,
+    # which omits the field and sends a simpler request body.
+    trigger: Optional[Literal["submit-message"]] = "submit-message"
     id: str = Field(default_factory=lambda: str(uuid4()))
     messages: list[UIMessage]
     # eneo-specific fields — pass via useChat's `body` option
@@ -70,6 +72,7 @@ class SubmitMessageRequest(BaseModel):
         default=None,
         description="UUID of an existing eneo session to continue.",
     )
+    model_config = {"extra": "allow"}
 
 
 class RegenerateMessageRequest(BaseModel):
@@ -81,7 +84,9 @@ class RegenerateMessageRequest(BaseModel):
     session_id: Optional[UUID] = None
 
 
-ChatRequest = Union[SubmitMessageRequest, RegenerateMessageRequest]
+# The discriminated union is used when `trigger` is present.
+# When absent, FastAPI falls back to SubmitMessageRequest (the first type).
+ChatRequest = Union[RegenerateMessageRequest, SubmitMessageRequest]
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +135,72 @@ def chunk_error(error_text: str) -> str:
 def chunk_data(name: str, data: Any) -> str:
     """Custom typed data chunk (type must match `data-*` pattern)."""
     return _chunk({"type": f"data-{name}", "data": data})
+
+
+# ---------------------------------------------------------------------------
+# Data Stream Protocol helpers  (useChat v6 default format)
+# ---------------------------------------------------------------------------
+# The data stream protocol is the older Vercel AI SDK streaming format used
+# by the useChat hook.  Each line is:  <type_code>:<json_value>\n
+#
+# Type codes used here:
+#   0  — text delta (string value)
+#   2  — typed data (array value); used to pass session_id to the frontend
+#   3  — error (string value)
+#   e  — finish step
+#   d  — stream done (final)
+
+DS_DONE_HEADER = "x-vercel-ai-data-stream"
+DS_DONE_HEADER_VALUE = "v1"
+
+
+def _ds_line(code: str, value: Any) -> str:
+    return f"{code}:{json.dumps(value)}\n"
+
+
+def ds_text(delta: str) -> str:
+    return _ds_line("0", delta)
+
+
+def ds_data(items: list[Any]) -> str:
+    """Send typed data (shown as annotations in useChat)."""
+    return _ds_line("2", items)
+
+
+def ds_error(message: str) -> str:
+    return _ds_line("3", message)
+
+
+def ds_finish_step(
+    finish_reason: str = "stop",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> str:
+    return _ds_line(
+        "e",
+        {
+            "finishReason": finish_reason,
+            "usage": {
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+            },
+            "isContinued": False,
+        },
+    )
+
+
+def ds_finish(
+    finish_reason: str = "stop",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> str:
+    return _ds_line(
+        "d",
+        {
+            "finishReason": finish_reason,
+            "usage": {
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+            },
+        },
+    )
