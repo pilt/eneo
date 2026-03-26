@@ -64,7 +64,9 @@ class CompletionService:
         Get the adapter for the given model.
 
         All models must have a provider_id linking to a ModelProvider.
-        Uses TenantModelAdapter which routes through LiteLLM.
+        The adapter type is determined by the provider's provider_type:
+        - "echo"  → EchoAdapter  (no credentials required, for testing)
+        - others  → TenantModelAdapter (routes through LiteLLM)
         """
         import sqlalchemy as sa
         from intric.database.tables.model_providers_table import ModelProviders
@@ -73,6 +75,9 @@ class CompletionService:
         )
         from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
+        )
+        from intric.completion_models.infrastructure.adapters.echo_adapter import (
+            EchoAdapter,
         )
 
         # All models must have provider_id
@@ -115,7 +120,20 @@ class CompletionService:
                 "Please contact your administrator to enable the provider."
             )
 
-        # Create credential resolver
+        # Echo provider — no credentials needed, use dedicated adapter
+        if provider_db.provider_type == "echo":
+            logger.info(
+                f"Using EchoAdapter for model '{model.name}'",
+                extra={
+                    "model_id": str(model.id) if hasattr(model, 'id') else None,
+                    "model_name": model.name,
+                    "provider_id": str(model.provider_id),
+                    "tenant_id": str(self.tenant.id) if self.tenant else None,
+                }
+            )
+            return EchoAdapter(model=model)
+
+        # Create credential resolver for all other providers
         credential_resolver = TenantModelCredentialResolver(
             provider_id=provider_db.id,
             provider_type=provider_db.provider_type,
