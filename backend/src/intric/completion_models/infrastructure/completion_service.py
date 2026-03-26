@@ -64,7 +64,9 @@ class CompletionService:
         Get the adapter for the given model.
 
         All models must have a provider_id linking to a ModelProvider.
-        Uses TenantModelAdapter which routes through LiteLLM.
+        The adapter type is determined by the provider's provider_type:
+        - "simulator"  → SimulatorAdapter  (no credentials required, for testing)
+        - others  → TenantModelAdapter (routes through LiteLLM)
         """
         import sqlalchemy as sa
         from intric.database.tables.model_providers_table import ModelProviders
@@ -73,6 +75,10 @@ class CompletionService:
         )
         from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
+        )
+        from intric.completion_models.infrastructure.adapters.simulator_adapter import (
+            SimulatorAdapter,
+            SimulationStrategy,
         )
 
         # All models must have provider_id
@@ -115,7 +121,27 @@ class CompletionService:
                 "Please contact your administrator to enable the provider."
             )
 
-        # Create credential resolver
+        # Simulator provider — no credentials needed, use dedicated adapter
+        if provider_db.provider_type == "simulator":
+            config = provider_db.config or {}
+            strategy = SimulationStrategy.from_config(config)
+            try:
+                token_delay = max(0.0, min(float(config.get("token_delay", 0.04)), 5.0))
+            except (ValueError, TypeError):
+                token_delay = 0.04
+            logger.info(
+                f"Using SimulatorAdapter for model '{model.name}' (strategy={strategy.value})",
+                extra={
+                    "model_id": str(model.id) if hasattr(model, 'id') else None,
+                    "model_name": model.name,
+                    "provider_id": str(model.provider_id),
+                    "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    "strategy": strategy.value,
+                }
+            )
+            return SimulatorAdapter(model=model, strategy=strategy, token_delay=token_delay)
+
+        # Create credential resolver for all other providers
         credential_resolver = TenantModelCredentialResolver(
             provider_id=provider_db.id,
             provider_type=provider_db.provider_type,

@@ -19,14 +19,14 @@
 # NOTE: INTRIC_* versions are still accepted but deprecated (removed in v3.0)
 # ----------------------------------------------------------------------------
 
-# Server-side backend URL (used by frontend SSR for API calls)
+# Primary backend URL (exposed to the browser for API calls)
 ENEO_BACKEND_URL=https://your-domain.com
 
-# Internal backend URL (server-to-server within Docker network)
+# Internal backend URL (overrides ENEO_BACKEND_URL for server-side rendering)
 # This connects directly to the backend container, skipping Traefik (faster for SSR)
 ENEO_BACKEND_SERVER_URL=http://backend:8000
 
-# Client-side backend URL (used by browser for API calls)
+# Public backend URL (used by unauthenticated client for login/federation flows)
 # The PUBLIC_ prefix exposes this to the browser (SvelteKit convention)
 PUBLIC_ENEO_BACKEND_URL=https://your-domain.com
 

@@ -40,6 +40,11 @@ DEFAULT_FIELDS: list[FieldDefinition] = [
 
 # Provider-specific field definitions (overrides DEFAULT_FIELDS entirely)
 PROVIDER_FIELD_DEFINITIONS: dict[str, list[FieldDefinition]] = {
+    "simulator": [
+        # No credentials required.  All fields are optional config.
+        {"name": "strategy", "required": False, "secret": False, "in_": "config"},
+        {"name": "token_delay", "required": False, "secret": False, "in_": "config"},
+    ],
     "azure": [
         {"name": "api_key", "required": True, "secret": True, "in_": "credentials"},
         {"name": "endpoint", "required": True, "secret": False, "in_": "config"},
@@ -71,6 +76,7 @@ def get_field_definitions(provider: str) -> list[FieldDefinition]:
 # - Azure requires: api_key, endpoint, api_version, deployment_name
 # - hosted_vllm requires: api_key, endpoint (for self-hosted vLLM servers)
 PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
+    "simulator": set(),  # No credentials needed — testing/development provider
     "openai": {"api_key"},
     "anthropic": {"api_key"},
     "azure": {"api_key", "endpoint", "api_version", "deployment_name"},

@@ -1,0 +1,265 @@
+"""
+Vercel AI SDK streaming protocol types.
+
+Request models and SSE chunk helpers for both:
+- **UI Message Stream Protocol** (named SSE events, ``x-vercel-ai-ui-message-stream: v1``)
+- **Data Stream Protocol** (line-coded format, ``x-vercel-ai-data-stream: v1``)
+
+See: https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Literal, Optional
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+
+class TextPart(BaseModel):
+    type: Literal["text"]
+    text: str
+
+
+class FilePart(BaseModel):
+    type: Literal["file"]
+    url: str
+    mediaType: str
+
+
+# Allow unknown part types to pass through
+class UnknownPart(BaseModel):
+    type: str
+    model_config = {"extra": "allow"}
+
+
+class UIMessage(BaseModel):
+    id: Optional[str] = None
+    role: Literal["user", "assistant", "system", "tool"]
+    parts: list[Any] = Field(default_factory=list)
+    model_config = {"extra": "allow"}
+
+    def text_content(self) -> str:
+        """Extract plain text from all text parts."""
+        texts = []
+        for part in self.parts:
+            if isinstance(part, dict) and part.get("type") == "text":
+                texts.append(part.get("text", ""))
+            elif isinstance(part, TextPart):
+                texts.append(part.text)
+        return "".join(texts)
+
+
+class SubmitMessageRequest(BaseModel):
+    # `trigger` is optional for compatibility with AI SDK v6's useChat hook,
+    # which omits the field and sends a simpler request body.
+    trigger: Optional[Literal["submit-message"]] = "submit-message"
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    messages: list[UIMessage]
+    # eneo-specific fields — pass via useChat's `body` option
+    assistant_id: Optional[UUID] = Field(
+        default=None,
+        description="UUID of the eneo assistant to chat with. "
+        "Required when starting a new conversation (no session_id).",
+    )
+    session_id: Optional[UUID] = Field(
+        default=None,
+        description="UUID of an existing eneo session to continue.",
+    )
+    model_config = {"extra": "allow"}
+
+
+class RegenerateMessageRequest(BaseModel):
+    trigger: Literal["regenerate-message"]
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    messageId: str
+    messages: list[UIMessage]
+    assistant_id: Optional[UUID] = None
+    session_id: Optional[UUID] = None
+
+
+# ---------------------------------------------------------------------------
+# SSE chunk helpers
+# ---------------------------------------------------------------------------
+
+STREAM_DONE = "data: [DONE]\n\n"
+
+
+def _chunk(data: dict[str, Any]) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def chunk_start(message_id: str) -> str:
+    return _chunk({"type": "start", "messageId": message_id})
+
+
+def chunk_start_step() -> str:
+    return _chunk({"type": "start-step"})
+
+
+def chunk_text_start(text_id: str) -> str:
+    return _chunk({"type": "text-start", "id": text_id})
+
+
+def chunk_text_delta(text_id: str, delta: str) -> str:
+    return _chunk({"type": "text-delta", "id": text_id, "delta": delta})
+
+
+def chunk_text_end(text_id: str) -> str:
+    return _chunk({"type": "text-end", "id": text_id})
+
+
+def chunk_finish_step() -> str:
+    return _chunk({"type": "finish-step"})
+
+
+def chunk_finish(finish_reason: str = "stop") -> str:
+    return _chunk({"type": "finish", "finishReason": finish_reason})
+
+
+def chunk_error(error_text: str) -> str:
+    return _chunk({"type": "error", "errorText": error_text})
+
+
+def chunk_data(name: str, data: Any) -> str:
+    """Custom typed data chunk (type must match `data-*` pattern)."""
+    return _chunk({"type": f"data-{name}", "data": data})
+
+
+# ---------------------------------------------------------------------------
+# Data Stream Protocol helpers  (useChat v6 default format)
+# ---------------------------------------------------------------------------
+# The data stream protocol is the older Vercel AI SDK streaming format used
+# by the useChat hook.  Each line is:  <type_code>:<json_value>\n
+#
+# Type codes used here:
+#   0  — text delta (string value)
+#   2  — typed data (array value); used to pass session_id to the frontend
+#   3  — error (string value)
+#   e  — finish step
+#   d  — stream done (final)
+
+# ---------------------------------------------------------------------------
+# OpenAI Chat Completions compatible helpers
+# ---------------------------------------------------------------------------
+# Minimal subset of the OpenAI streaming format so that any OpenAI-compatible
+# client (pydantic-ai, openai-python, LangChain, etc.) can talk to the gateway.
+
+
+class OpenAIChatRequest(BaseModel):
+    """OpenAI-compatible /v1/chat/completions request body with eneo extensions."""
+
+    model: str = "default"
+    messages: list[dict[str, Any]]
+    stream: bool = True
+    # eneo extensions
+    assistant_id: Optional[str] = None
+    session_id: Optional[str] = None
+    model_config = {"extra": "allow"}
+
+    def last_user_content(self) -> str:
+        """Extract text from the last user message."""
+        for msg in reversed(self.messages):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                # handle list-of-parts format
+                if isinstance(content, list):
+                    return "".join(
+                        p.get("text", "") for p in content if p.get("type") == "text"
+                    )
+        return ""
+
+
+def openai_chat_chunk(
+    chunk_id: str,
+    delta_content: str | None = None,
+    finish_reason: str | None = None,
+    model: str = "eneo",
+) -> str:
+    """Format a single SSE chunk in OpenAI chat completions streaming format."""
+    delta: dict[str, Any] = {}
+    if delta_content is not None:
+        delta["content"] = delta_content
+    if finish_reason is not None:
+        delta = {}  # final chunk has empty delta
+
+    chunk = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {json.dumps(chunk)}\n\n"
+
+
+OPENAI_STREAM_DONE = "data: [DONE]\n\n"
+
+
+DS_DONE_HEADER = "x-vercel-ai-data-stream"
+DS_DONE_HEADER_VALUE = "v1"
+
+
+def _ds_line(code: str, value: Any) -> str:
+    return f"{code}:{json.dumps(value)}\n"
+
+
+def ds_text(delta: str) -> str:
+    return _ds_line("0", delta)
+
+
+def ds_data(items: list[Any]) -> str:
+    """Send typed data (shown as annotations in useChat)."""
+    return _ds_line("2", items)
+
+
+def ds_error(message: str) -> str:
+    return _ds_line("3", message)
+
+
+def ds_finish_step(
+    finish_reason: str = "stop",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> str:
+    return _ds_line(
+        "e",
+        {
+            "finishReason": finish_reason,
+            "usage": {
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+            },
+            "isContinued": False,
+        },
+    )
+
+
+def ds_finish(
+    finish_reason: str = "stop",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> str:
+    return _ds_line(
+        "d",
+        {
+            "finishReason": finish_reason,
+            "usage": {
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+            },
+        },
+    )
