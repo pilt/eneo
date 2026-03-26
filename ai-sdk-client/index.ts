@@ -10,7 +10,7 @@
  *   Set ENEO_API_KEY env var or pass --api-key <key>
  *
  * The eneo backend must be running with the AI gateway endpoint mounted at
- * /api/ai-gateway/chat.
+ * /api/v1/ai-gateway/chat-ui.
  */
 
 import { parseJsonEventStream, uiMessageChunkSchema } from "ai";
@@ -98,7 +98,7 @@ interface SubmitMessageRequest {
 
 async function chat(config: Config): Promise<void> {
   const { url, assistantId, sessionId, apiKey, message } = config;
-  const endpoint = `${url}/api/ai-gateway/chat`;
+  const endpoint = `${url}/api/v1/ai-gateway/chat-ui`;
 
   const body: SubmitMessageRequest = {
     trigger: "submit-message",
@@ -153,37 +153,43 @@ async function chat(config: Config): Promise<void> {
   process.stdout.write("< ");
 
   for await (const result of chunkStream) {
-    if (result.success) {
-      const chunk = result.value;
+    if (!result.success) continue;
 
-      switch (chunk.type) {
-        case "text-delta":
-          process.stdout.write(chunk.delta);
-          break;
+    const chunk = result.value;
 
-        case "error":
-          process.stderr.write(`\nError from server: ${chunk.errorText}\n`);
-          break;
+    switch (chunk.type) {
+      case "text-delta":
+        process.stdout.write(chunk.delta);
+        break;
 
-        case "finish":
-          process.stdout.write(
-            `\n\n[done — finish reason: ${chunk.finishReason ?? "stop"}]\n`
-          );
-          break;
-      }
-    } else {
-      // Custom eneo chunks (e.g. data-session) fail schema validation
-      // but are still valid JSON in the SSE stream — extract them from
-      // the raw value attached to the parse error.
-      const raw = (result as { rawValue?: Record<string, unknown> }).rawValue;
-      if (raw?.type === "data-session") {
-        const data = raw.data as { session_id?: string } | undefined;
-        if (data?.session_id) {
-          process.stdout.write(
-            `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`
-          );
-          process.stdout.write("< ");
+      case "error":
+        process.stderr.write(`\nError from server: ${chunk.errorText}\n`);
+        break;
+
+      case "finish":
+        process.stdout.write(
+          `\n\n[done — finish reason: ${chunk.finishReason ?? "stop"}]\n`
+        );
+        break;
+
+      default: {
+        // Handle eneo-specific chunks (e.g. data-session).
+        // In ai v6, the schema passes unknown event types through.
+        const anyChunk = chunk as Record<string, unknown>;
+        if (
+          anyChunk.type === "data-session" &&
+          typeof anyChunk.data === "object" &&
+          anyChunk.data !== null
+        ) {
+          const data = anyChunk.data as { session_id?: string };
+          if (data.session_id) {
+            process.stdout.write(
+              `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`
+            );
+            process.stdout.write("< ");
+          }
         }
+        break;
       }
     }
   }
