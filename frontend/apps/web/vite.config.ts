@@ -1,5 +1,6 @@
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vitest/config";
+import { loadEnv } from "vite";
 import type { PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
@@ -14,7 +15,9 @@ const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "PUBLIC_");
+  return {
   plugins: [
     // visualizer({
     //   emitFile: true,
@@ -38,7 +41,7 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: (() => {
       try {
-        const origin = process.env.PUBLIC_ORIGIN;
+        const origin = env.PUBLIC_ORIGIN;
         if (origin) return [new URL(origin).hostname];
       } catch {}
       return [];
@@ -54,4 +57,5 @@ export default defineConfig({
       ? `"${process.env.CF_PAGES_COMMIT_SHA}"`
       : `"${process.env.VERCEL_GIT_COMMIT_SHA}"`
   }
+};
 });
