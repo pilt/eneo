@@ -40,9 +40,9 @@ DEFAULT_FIELDS: list[FieldDefinition] = [
 
 # Provider-specific field definitions (overrides DEFAULT_FIELDS entirely)
 PROVIDER_FIELD_DEFINITIONS: dict[str, list[FieldDefinition]] = {
-    "echo": [
-        # No credentials required — the echo provider needs no API key.
-        # It echoes back user input and is intended for testing/development.
+    "simulator": [
+        # No credentials required.  Strategy is optional config.
+        {"name": "strategy", "required": False, "secret": False, "in_": "config"},
     ],
     "azure": [
         {"name": "api_key", "required": True, "secret": True, "in_": "credentials"},
@@ -75,7 +75,7 @@ def get_field_definitions(provider: str) -> list[FieldDefinition]:
 # - Azure requires: api_key, endpoint, api_version, deployment_name
 # - hosted_vllm requires: api_key, endpoint (for self-hosted vLLM servers)
 PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
-    "echo": set(),  # No credentials needed — testing/development provider
+    "simulator": set(),  # No credentials needed — testing/development provider
     "openai": {"api_key"},
     "anthropic": {"api_key"},
     "azure": {"api_key", "endpoint", "api_version", "deployment_name"},

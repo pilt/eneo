@@ -76,8 +76,9 @@ class CompletionService:
         from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
         )
-        from intric.completion_models.infrastructure.adapters.echo_adapter import (
-            EchoAdapter,
+        from intric.completion_models.infrastructure.adapters.simulator_adapter import (
+            SimulatorAdapter,
+            SimulationStrategy,
         )
 
         # All models must have provider_id
@@ -120,18 +121,20 @@ class CompletionService:
                 "Please contact your administrator to enable the provider."
             )
 
-        # Echo provider — no credentials needed, use dedicated adapter
-        if provider_db.provider_type == "echo":
+        # Simulator provider — no credentials needed, use dedicated adapter
+        if provider_db.provider_type == "simulator":
+            strategy = SimulationStrategy.from_config(provider_db.config or {})
             logger.info(
-                f"Using EchoAdapter for model '{model.name}'",
+                f"Using SimulatorAdapter for model '{model.name}' (strategy={strategy.value})",
                 extra={
                     "model_id": str(model.id) if hasattr(model, 'id') else None,
                     "model_name": model.name,
                     "provider_id": str(model.provider_id),
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
+                    "strategy": strategy.value,
                 }
             )
-            return EchoAdapter(model=model)
+            return SimulatorAdapter(model=model, strategy=strategy)
 
         # Create credential resolver for all other providers
         credential_resolver = TenantModelCredentialResolver(
