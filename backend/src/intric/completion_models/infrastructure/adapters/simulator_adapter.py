@@ -57,7 +57,7 @@ if TYPE_CHECKING:
         ModelKwargs,
     )
 
-_TOKEN_DELAY_SECONDS = 0.04  # ~25 tokens/second
+_DEFAULT_TOKEN_DELAY = 0.04  # ~25 tokens/second, used when token_delay not set
 
 
 class SimulationStrategy(str, Enum):
@@ -90,9 +90,11 @@ class SimulatorAdapter(CompletionModelAdapter):
         self,
         model: "CompletionModel",
         strategy: SimulationStrategy = SimulationStrategy.ECHO,
+        token_delay: float = _DEFAULT_TOKEN_DELAY,
     ):
         super().__init__(model)
         self.strategy = strategy
+        self.token_delay = token_delay
 
     # ------------------------------------------------------------------
     # Helpers
@@ -115,8 +117,8 @@ class SimulatorAdapter(CompletionModelAdapter):
     async def get_response(
         self,
         context: "Context",
-        model_kwargs: "ModelKwargs | None" = None,
-        mcp_proxy=None,
+        model_kwargs: "ModelKwargs | None" = None,  # interface compatibility
+        mcp_proxy=None,  # interface compatibility
         **kwargs,
     ) -> Completion:
         reply = self._generate_reply(context.input)
@@ -133,8 +135,8 @@ class SimulatorAdapter(CompletionModelAdapter):
     async def prepare_streaming(
         self,
         context: "Context",
-        model_kwargs: "ModelKwargs | None" = None,
-        mcp_proxy=None,
+        model_kwargs: "ModelKwargs | None" = None,  # interface compatibility
+        mcp_proxy=None,  # interface compatibility
         **kwargs,
     ) -> Any:
         """Phase 1: validate strategy and return context input for Phase 2."""
@@ -145,14 +147,14 @@ class SimulatorAdapter(CompletionModelAdapter):
     async def iterate_stream(  # type: ignore[override]
         self,
         stream: str,
-        context: "Context" = None,
-        model_kwargs: "ModelKwargs | None" = None,
-        require_tool_approval: bool = False,
-        approval_manager=None,
+        context: "Context" = None,  # interface compatibility
+        model_kwargs: "ModelKwargs | None" = None,  # interface compatibility
+        require_tool_approval: bool = False,  # interface compatibility
+        approval_manager=None,  # interface compatibility
     ) -> AsyncIterator[Completion]:
         """Phase 2: yield one Completion per word, then a stop Completion."""
         reply = self._generate_reply(stream)
-        words = reply.split(" ")
+        words = reply.split()
 
         for i, word in enumerate(words):
             delta = word if i == 0 else f" {word}"
@@ -161,7 +163,8 @@ class SimulatorAdapter(CompletionModelAdapter):
                 response_type=ResponseType.TEXT,
                 stop=False,
             )
-            await asyncio.sleep(_TOKEN_DELAY_SECONDS)
+            if self.token_delay > 0:
+                await asyncio.sleep(self.token_delay)
 
         yield Completion(
             text="",

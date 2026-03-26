@@ -14,6 +14,11 @@
  */
 
 import { parseJsonEventStream, uiMessageChunkSchema } from "ai";
+import type { z } from "zod";
+
+// Custom chunk type for eneo-specific data annotations not in the standard schema
+type DataSessionChunk = { type: "data-session"; data: { session_id: string } };
+type EneoChunk = z.infer<typeof uiMessageChunkSchema> | DataSessionChunk;
 import { randomUUID } from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -155,7 +160,7 @@ async function chat(config: Config): Promise<void> {
   for await (const result of chunkStream) {
     if (!result.success) continue;
 
-    const chunk = result.value;
+    const chunk = result.value as EneoChunk;
 
     switch (chunk.type) {
       case "text-delta":
@@ -175,7 +180,7 @@ async function chat(config: Config): Promise<void> {
       default:
         // Print session_id from data-session chunk for conversation continuity
         if (chunk.type === "data-session") {
-          const data = (chunk as any).data as { session_id: string };
+          const data = (chunk as DataSessionChunk).data;
           if (data?.session_id) {
             process.stdout.write(
               `\n[session: ${data.session_id} — pass --session ${data.session_id} to continue]\n`

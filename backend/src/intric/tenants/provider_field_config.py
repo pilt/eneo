@@ -41,8 +41,9 @@ DEFAULT_FIELDS: list[FieldDefinition] = [
 # Provider-specific field definitions (overrides DEFAULT_FIELDS entirely)
 PROVIDER_FIELD_DEFINITIONS: dict[str, list[FieldDefinition]] = {
     "simulator": [
-        # No credentials required.  Strategy is optional config.
+        # No credentials required.  All fields are optional config.
         {"name": "strategy", "required": False, "secret": False, "in_": "config"},
+        {"name": "token_delay", "required": False, "secret": False, "in_": "config"},
     ],
     "azure": [
         {"name": "api_key", "required": True, "secret": True, "in_": "credentials"},

@@ -38,7 +38,8 @@ def simulator_model() -> CompletionModel:
 
 @pytest.fixture
 def adapter(simulator_model: CompletionModel) -> SimulatorAdapter:
-    return SimulatorAdapter(model=simulator_model, strategy=SimulationStrategy.ECHO)
+    # token_delay=0 keeps tests fast — no artificial streaming latency needed
+    return SimulatorAdapter(model=simulator_model, strategy=SimulationStrategy.ECHO, token_delay=0)
 
 
 def make_context(text: str) -> Context:

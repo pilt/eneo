@@ -123,7 +123,9 @@ class CompletionService:
 
         # Simulator provider — no credentials needed, use dedicated adapter
         if provider_db.provider_type == "simulator":
-            strategy = SimulationStrategy.from_config(provider_db.config or {})
+            config = provider_db.config or {}
+            strategy = SimulationStrategy.from_config(config)
+            token_delay = float(config.get("token_delay", 0.04))
             logger.info(
                 f"Using SimulatorAdapter for model '{model.name}' (strategy={strategy.value})",
                 extra={
@@ -134,7 +136,7 @@ class CompletionService:
                     "strategy": strategy.value,
                 }
             )
-            return SimulatorAdapter(model=model, strategy=strategy)
+            return SimulatorAdapter(model=model, strategy=strategy, token_delay=token_delay)
 
         # Create credential resolver for all other providers
         credential_resolver = TenantModelCredentialResolver(
