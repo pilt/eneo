@@ -65,7 +65,7 @@ class CompletionService:
 
         All models must have a provider_id linking to a ModelProvider.
         The adapter type is determined by the provider's provider_type:
-        - "echo"  → EchoAdapter  (no credentials required, for testing)
+        - "simulator"  → SimulatorAdapter  (no credentials required, for testing)
         - others  → TenantModelAdapter (routes through LiteLLM)
         """
         import sqlalchemy as sa
